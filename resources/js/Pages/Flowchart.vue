@@ -37,6 +37,7 @@ const {
     getSelectedEdges,
     removeNodes,
     removeEdges,
+    endConnection,
 } = useVueFlow();
 
 const form = useForm({
@@ -117,6 +118,8 @@ onConnect((params) => {
         style: { stroke: '#000', strokeWidth: 3, fill: 'none' },
         markerEnd: { type: MarkerType.ArrowClosed, color: '#000' },
     });
+
+    endConnection();
 });
 
 // Handle edge reconnection
