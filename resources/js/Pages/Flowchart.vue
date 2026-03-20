@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
@@ -31,10 +31,12 @@ const {
     onNodesChange,
     onEdgesChange,
     findNode,
-    removeEdges,
     updateEdge,
     onEdgeUpdate,
     getSelectedNodes,
+    getSelectedEdges,
+    removeNodes,
+    removeEdges,
 } = useVueFlow();
 
 const form = useForm({
@@ -72,6 +74,38 @@ onMounted(() => {
             console.error('Failed to load project data:', e);
         }
     }
+});
+
+const handleDeleteKey = (event) => {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') {
+        return;
+    }
+
+    const selectedNodes = getSelectedNodes.value;
+    const selectedEdges = getSelectedEdges.value;
+
+    if (!selectedNodes.length && !selectedEdges.length) {
+        return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (selectedEdges.length) {
+        removeEdges(selectedEdges);
+    }
+
+    if (selectedNodes.length) {
+        removeNodes(selectedNodes, true);
+    }
+};
+
+onMounted(() => {
+    window.addEventListener('keydown', handleDeleteKey, true);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('keydown', handleDeleteKey, true);
 });
 
 // Handle manual connections (Drag & Drop)
@@ -192,11 +226,6 @@ const updateNodeLabel = (id, newLabel) => {
     if (node) {
         node.label = newLabel;
     }
-};
-
-// Remove edge on click
-const onEdgeClick = ({ edge }) => {
-    removeEdges([edge.id]);
 };
 
 // Export Functions
@@ -349,7 +378,6 @@ const exportFlowchart = async (format) => {
                     @edges-change="onEdgesChange"
                     @edge-update="onEdgeUpdate"
                     @connect="onConnect"
-                    @edge-click="onEdgeClick"
                     :edges-updatable="true"
                     :connection-mode="ConnectionMode.Loose"
                     :default-edge-options="{ type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed, color: '#000' }, style: { stroke: '#000', strokeWidth: 3, fill: 'none' }, updatable: true }"
@@ -506,6 +534,7 @@ const exportFlowchart = async (format) => {
 
 .flowchart-flow .vue-flow__edge-path { stroke: #000 !important; stroke-width: 3px !important; cursor: pointer; fill: none !important; }
 .flowchart-flow .vue-flow__edge-path:hover { stroke-width: 4px !important; stroke: #ef4444 !important; }
+.flowchart-flow .vue-flow__edge.selected .vue-flow__edge-path { stroke: #ef4444 !important; stroke-width: 4px !important; }
 
 .flowchart-flow .vue-flow__handle { 
     width: 12px !important; 
