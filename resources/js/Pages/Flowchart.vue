@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType } from '@vue-flow/core';
+import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType, getRectOfNodes, getTransformForBounds } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { toPng, toJpeg } from 'html-to-image';
@@ -258,39 +258,53 @@ const exportFlowchart = async (format) => {
         a.click();
     };
 
-    // Fit view before export to ensure everything is visible
-    fitView({ padding: 0.1 });
+    const currentNodes = nodes.value || [];
+    if (!currentNodes.length) {
+        alert('No nodes to export.');
+        return;
+    }
 
-    // Wait a little bit for the view to adjust
-    setTimeout(async () => {
-        try {
-            const options = {
-                backgroundColor: '#f8f9fa',
-                quality: 1,
-                pixelRatio: 2,
-            };
+    const bounds = getRectOfNodes(currentNodes);
+    const padding = 80;
+    const exportWidth = Math.max(1, Math.ceil(bounds.width + padding * 2));
+    const exportHeight = Math.max(1, Math.ceil(bounds.height + padding * 2));
+    const viewport = getTransformForBounds(bounds, exportWidth, exportHeight, 0.01, 4, padding / Math.max(exportWidth, exportHeight));
 
-            if (format === 'png') {
-                const dataUrl = await toPng(el, options);
-                download(dataUrl, 'png');
-            } else if (format === 'jpg') {
-                const dataUrl = await toJpeg(el, options);
-                download(dataUrl, 'jpg');
-            } else if (format === 'pdf') {
-                const dataUrl = await toPng(el, options);
-                const pdf = new jsPDF({
-                    orientation: 'landscape',
-                    unit: 'px',
-                    format: [el.offsetWidth, el.offsetHeight]
-                });
-                pdf.addImage(dataUrl, 'PNG', 0, 0, el.offsetWidth, el.offsetHeight);
-                pdf.save(`${form.title.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}.pdf`);
-            }
-        } catch (err) {
-            console.error('Failed to export:', err);
-            alert('Failed to export flowchart.');
+    try {
+        const options = {
+            backgroundColor: '#f8f9fa',
+            quality: 1,
+            pixelRatio: 2,
+            width: exportWidth,
+            height: exportHeight,
+            style: {
+                width: `${exportWidth}px`,
+                height: `${exportHeight}px`,
+                transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+                transformOrigin: '0 0',
+            },
+        };
+
+        if (format === 'png') {
+            const dataUrl = await toPng(el, options);
+            download(dataUrl, 'png');
+        } else if (format === 'jpg') {
+            const dataUrl = await toJpeg(el, options);
+            download(dataUrl, 'jpg');
+        } else if (format === 'pdf') {
+            const dataUrl = await toPng(el, options);
+            const pdf = new jsPDF({
+                orientation: exportWidth >= exportHeight ? 'landscape' : 'portrait',
+                unit: 'px',
+                format: [exportWidth, exportHeight],
+            });
+            pdf.addImage(dataUrl, 'PNG', 0, 0, exportWidth, exportHeight);
+            pdf.save(`${form.title.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}.pdf`);
         }
-    }, 200);
+    } catch (err) {
+        console.error('Failed to export:', err);
+        alert('Failed to export flowchart.');
+    }
 };
 </script>
 
