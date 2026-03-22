@@ -2,14 +2,10 @@
 import Checkbox from '@/Components/Checkbox.vue';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 
 defineProps({
-    canResetPassword: {
-        type: Boolean,
-    },
     status: {
         type: String,
     },
@@ -78,13 +74,6 @@ const submit = () => {
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
                             <InputLabel for="password" value="Password" class="text-xs uppercase tracking-widest font-bold text-gray-400" />
-                            <Link
-                                v-if="canResetPassword"
-                                :href="route('password.request')"
-                                class="text-xs font-bold text-gray-400 hover:text-black transition-colors uppercase tracking-tighter"
-                            >
-                                Forgot?
-                            </Link>
                         </div>
                         <TextInput
                             id="password"
@@ -121,20 +110,18 @@ const submit = () => {
                             </svg>
                         </button>
                     </div>
+
+                    <div class="pt-2 text-center">
+                        <Link
+                            :href="route('register')"
+                            class="text-xs font-bold text-gray-500 hover:text-black transition-colors uppercase tracking-tighter"
+                        >
+                            Register
+                        </Link>
+                    </div>
                 </form>
             </div>
 
-            <!-- Footer -->
-            <div class="pt-12 flex flex-col space-y-4">
-                <p class="text-xs text-gray-400 font-medium uppercase tracking-widest">
-                    &copy; 2026 Flowchart Flowchart System. All rights reserved.
-                </p>
-                <div class="flex space-x-6">
-                    <a href="#" class="text-xs font-bold text-gray-400 hover:text-black transition-colors uppercase tracking-tighter">Privacy</a>
-                    <a href="#" class="text-xs font-bold text-gray-400 hover:text-black transition-colors uppercase tracking-tighter">Terms</a>
-                    <a href="#" class="text-xs font-bold text-gray-400 hover:text-black transition-colors uppercase tracking-tighter">Support</a>
-                </div>
-            </div>
         </div>
 
         <!-- Right Column: Visual Section -->
