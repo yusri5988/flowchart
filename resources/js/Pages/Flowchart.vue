@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
@@ -80,6 +80,14 @@ onMounted(() => {
 const handleDeleteKey = (event) => {
     if (event.key !== 'Delete' && event.key !== 'Backspace') {
         return;
+    }
+
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+        const isTypingTarget = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+        if (isTypingTarget) {
+            return;
+        }
     }
 
     const selectedNodes = getSelectedNodes.value;
@@ -220,7 +228,12 @@ const saveProject = () => {
 
 // Remove node
 const removeNode = (id) => {
-    nodes.value = nodes.value.filter(n => n.id !== id);
+    const node = findNode(id);
+    if (!node) {
+        return;
+    }
+
+    removeNodes([node], true);
 };
 
 // Update node label
@@ -228,6 +241,7 @@ const updateNodeLabel = (id, newLabel) => {
     const node = nodes.value.find(n => n.id === id);
     if (node) {
         node.label = newLabel;
+        node.data = { ...(node.data || {}), label: newLabel };
     }
 };
 
@@ -366,10 +380,6 @@ const exportFlowchart = async (format) => {
                     </div>
                     <span class="sidebar-label">Text</span>
                 </button>
-
-                <div class="pt-8 border-t border-gray-100 w-12 flex flex-col items-center space-y-4 text-center">
-                    <div class="text-[7px] font-black text-gray-300 uppercase tracking-tighter">Drag dots to connect</div>
-                </div>
             </aside>
 
             <!-- Editor Area -->
@@ -477,7 +487,7 @@ const exportFlowchart = async (format) => {
 
 .flowchart-text-node {
     background: transparent;
-    border: 1px dashed #e5e7eb;
+    border: 1px dashed transparent;
     width: 150px;
     min-height: 40px;
     display: flex;
@@ -490,6 +500,7 @@ const exportFlowchart = async (format) => {
 .flowchart-node.selected, .flowchart-text-node.selected {
     box-shadow: 0 0 0 4px rgba(0,0,0,0.1);
     border-color: #000;
+    border-style: dashed;
 }
 
 /* Quick Add Buttons */
