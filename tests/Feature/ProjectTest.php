@@ -123,4 +123,51 @@ class ProjectTest extends TestCase
         $response->assertStatus(403);
         $this->assertDatabaseHas('projects', ['id' => $project->id]);
     }
+
+    public function test_user_can_autosave_their_project(): void
+    {
+        $user = User::factory()->create();
+        $project = Project::factory()->create(['user_id' => $user->id]);
+
+        $newContent = json_encode(['nodes' => [['id' => '1', 'label' => 'New Node']], 'edges' => []]);
+        $response = $this->actingAs($user)->patch("/projects/{$project->id}/autosave", [
+            'content' => $newContent,
+            'title' => 'Autosaved Title',
+            'description' => 'Autosaved Description',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJson(['status' => 'success']);
+        
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'content' => $newContent,
+            'title' => 'Autosaved Title',
+        ]);
+    }
+
+    public function test_user_cannot_autosave_others_project(): void
+    {
+        $user = User::factory()->create();
+        $otherUser = User::factory()->create();
+        $project = Project::factory()->create(['user_id' => $otherUser->id]);
+
+        $response = $this->actingAs($user)->patch("/projects/{$project->id}/autosave", [
+            'content' => json_encode(['nodes' => [], 'edges' => []]),
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_autosave_requires_content(): void
+    {
+        $user = User::factory()->create();
+        $project = Project::factory()->create(['user_id' => $user->id]);
+
+        $response = $this->actingAs($user)->patch("/projects/{$project->id}/autosave", [
+            'title' => 'New Title',
+        ]);
+
+        $response->assertSessionHasErrors('content');
+    }
 }

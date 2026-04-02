@@ -14,6 +14,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/dashboard', [ProjectController::class, 'index'])->name('dashboard');
     Route::get('/flowchart/{project?}', [ProjectController::class, 'show'])->name('flowchart');
     Route::post('/projects', [ProjectController::class, 'store'])->name('projects.save');
+    Route::patch('/projects/{project}/autosave', [ProjectController::class, 'autosave'])->name('projects.autosave');
     Route::delete('/projects/{project}', [ProjectController::class, 'destroy'])->name('projects.destroy');
 });
 

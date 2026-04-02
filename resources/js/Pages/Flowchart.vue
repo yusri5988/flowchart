@@ -1,11 +1,12 @@
 <script setup>
-import { onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType, getRectOfNodes, getTransformForBounds } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { toPng, toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
+import axios from 'axios';
 
 // Import Vue Flow styles
 import '@vue-flow/core/dist/style.css';
@@ -18,6 +19,9 @@ const props = defineProps({
         default: null,
     },
 });
+
+const lastSaved = ref(null);
+const isSaving = ref(false);
 
 const { 
     addNodes, 
@@ -47,6 +51,39 @@ const form = useForm({
     content: props.project?.content || JSON.stringify({ nodes: [], edges: [] }),
 });
 
+// Debounce helper
+const debounce = (fn, delay) => {
+    let timeoutId;
+    return (...args) => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => fn(...args), delay);
+    };
+};
+
+// Auto-save function
+const autoSaveProject = async () => {
+    if (!form.id) return; // Don't auto-save if no ID (new project)
+
+    try {
+        isSaving.value = true;
+        const response = await axios.patch(route('projects.autosave', { project: form.id }), {
+            content: JSON.stringify(toObject()),
+            title: form.title,
+            description: form.description,
+        });
+        
+        if (response.data.status === 'success') {
+            lastSaved.value = response.data.last_saved;
+        }
+    } catch (error) {
+        console.error('Auto-save failed:', error);
+    } finally {
+        isSaving.value = false;
+    }
+};
+
+const debouncedAutoSave = debounce(autoSaveProject, 2000);
+
 // Initialize flowchart data
 onMounted(() => {
     if (props.project?.content) {
@@ -75,7 +112,15 @@ onMounted(() => {
             console.error('Failed to load project data:', e);
         }
     }
+
+    // Trigger auto-save on any change
+    onNodesChange(debouncedAutoSave);
+    onEdgesChange(debouncedAutoSave);
 });
+
+// Also watch title and description for auto-save
+watch(() => form.title, debouncedAutoSave);
+watch(() => form.description, debouncedAutoSave);
 
 const handleDeleteKey = (event) => {
     if (event.key !== 'Delete' && event.key !== 'Backspace') {
@@ -128,11 +173,13 @@ onConnect((params) => {
     });
 
     endConnection();
+    debouncedAutoSave();
 });
 
 // Handle edge reconnection
 onEdgeUpdate(({ edge, connection }) => {
     updateEdge(edge, connection);
+    debouncedAutoSave();
 });
 
 // Quick Add Node Function
@@ -174,6 +221,7 @@ const quickAdd = (sourceId, direction) => {
             markerEnd: { type: MarkerType.ArrowClosed, color: '#000' },
             updatable: true,
         });
+        debouncedAutoSave();
     }, 100);
 };
 
@@ -206,7 +254,10 @@ const addBox = () => {
                 markerEnd: { type: MarkerType.ArrowClosed, color: '#000' },
                 updatable: true,
             });
+            debouncedAutoSave();
         }, 100);
+    } else {
+        debouncedAutoSave();
     }
 };
 
@@ -218,6 +269,7 @@ const addText = () => {
         label: 'TEXT LABEL',
         position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
     });
+    debouncedAutoSave();
 };
 
 // Save the project
@@ -234,6 +286,7 @@ const removeNode = (id) => {
     }
 
     removeNodes([node], true);
+    debouncedAutoSave();
 };
 
 // Update node label
@@ -242,6 +295,7 @@ const updateNodeLabel = (id, newLabel) => {
     if (node) {
         node.label = newLabel;
         node.data = { ...(node.data || {}), label: newLabel };
+        debouncedAutoSave();
     }
 };
 
@@ -336,6 +390,19 @@ const exportFlowchart = async (format) => {
             </div>
 
             <div class="flex items-center space-x-4">
+                <!-- Auto-save Status -->
+                <div v-if="form.id" class="text-[10px] text-gray-400 font-bold uppercase tracking-widest flex items-center space-x-2">
+                    <div v-if="isSaving" class="flex items-center space-x-1">
+                        <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Saving...</span>
+                    </div>
+                    <span v-else-if="lastSaved">Last saved {{ lastSaved }}</span>
+                    <span v-else>Autosave enabled</span>
+                </div>
+
                 <!-- Export Dropdown -->
                 <div class="relative group">
                     <button class="px-4 py-2 bg-gray-100 text-black text-xs font-bold uppercase tracking-widest hover:bg-gray-200 transition-all duration-300 flex items-center space-x-2 border border-gray-200">

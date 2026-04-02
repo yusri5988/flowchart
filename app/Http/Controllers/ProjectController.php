@@ -61,6 +61,28 @@ class ProjectController extends Controller
     }
 
     /**
+     * Auto-save the project content in the background.
+     */
+    public function autosave(Request $request, Project $project): \Illuminate\Http\JsonResponse
+    {
+        $this->authorize('update', $project);
+
+        $validated = $request->validate([
+            'content' => 'required|json',
+            'title' => 'sometimes|string|max:255',
+            'description' => 'sometimes|string|nullable',
+        ]);
+
+        $project->update($validated);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Project autosaved successfully.',
+            'last_saved' => now()->toDateTimeString(),
+        ]);
+    }
+
+    /**
      * Remove the specified project from storage.
      */
     public function destroy(Project $project): RedirectResponse
