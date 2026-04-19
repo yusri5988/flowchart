@@ -1,12 +1,119 @@
 <script setup>
-import { onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue';
+import { onMounted, onBeforeUnmount, nextTick, ref, watch, h } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType, getRectOfNodes, getTransformForBounds } from '@vue-flow/core';
+import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType, getRectOfNodes, getTransformForBounds, BaseEdge, getSmoothStepPath } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { toPng, toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
+
+import { defineComponent } from 'vue';
+
+// Custom Editable Edge Component
+const EditableEdge = defineComponent({
+    props: ['id', 'sourceX', 'sourceY', 'targetX', 'targetY', 'sourcePosition', 'targetPosition', 'data', 'style', 'markerEnd', 'selected'],
+    setup(props) {
+        const { findEdge, setEdges, edges, screenToFlowCoordinate } = useVueFlow();
+        
+        const onWaypointDrag = (event, index) => {
+            const position = screenToFlowCoordinate({
+                x: event.clientX,
+                y: event.clientY,
+            });
+            
+            const edge = findEdge(props.id);
+            if (edge) {
+                const newWaypoints = [...(edge.data?.waypoints || [])];
+                newWaypoints[index] = { x: position.x, y: position.y };
+                
+                setEdges(edges.value.map(e => 
+                    e.id === props.id 
+                        ? { ...e, data: { ...e.data, waypoints: newWaypoints } }
+                        : e
+                ));
+            }
+        };
+
+        const removeWaypoint = (index) => {
+            const edge = findEdge(props.id);
+            if (edge) {
+                const newWaypoints = [...(edge.data?.waypoints || [])];
+                newWaypoints.splice(index, 1);
+                setEdges(edges.value.map(e => 
+                    e.id === props.id 
+                        ? { ...e, data: { ...e.data, waypoints: newWaypoints } }
+                        : e
+                ));
+            }
+        };
+
+        return { onWaypointDrag, removeWaypoint };
+    },
+    render() {
+        const waypoints = this.data?.waypoints || [];
+        
+        const getPath = () => {
+            if (waypoints.length === 0) {
+                const [path] = getSmoothStepPath(this.$props);
+                return path;
+            }
+            let path = `M ${this.sourceX},${this.sourceY}`;
+            waypoints.forEach((wp) => {
+                path += ` L ${wp.x},${wp.y}`;
+            });
+            path += ` L ${this.targetX},${this.targetY}`;
+            return path;
+        };
+
+        const circles = (this.selected && waypoints.length > 0) 
+            ? waypoints.map((wp, index) => 
+                h('circle', {
+                    cx: wp.x,
+                    cy: wp.y,
+                    r: 8, // Besarkan sikit supaya senang nak tangkap
+                    fill: '#ef4444',
+                    stroke: '#fff',
+                    'stroke-width': 2,
+                    style: { cursor: 'move', pointerEvents: 'all', zIndex: 1000 },
+                    onMousedown: (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const move = (ev) => this.onWaypointDrag(ev, index);
+                        const up = () => {
+                            window.removeEventListener('mousemove', move);
+                            window.removeEventListener('mouseup', up);
+                        };
+                        window.addEventListener('mousemove', move);
+                        window.addEventListener('mouseup', up);
+                    },
+                    onDblclick: (e) => {
+                        e.stopPropagation();
+                        this.removeWaypoint(index);
+                    }
+                })
+            ) : [];
+
+        return h('g', { style: { pointerEvents: 'all' } }, [
+            h('path', {
+                id: this.id,
+                style: { ...this.style, pointerEvents: 'stroke' },
+                class: ['vue-flow__edge-path', { selected: this.selected }],
+                d: getPath(),
+                'marker-end': this.markerEnd,
+            }),
+            // Tambah satu path halimunan yang lebar untuk memudahkan klik
+            h('path', {
+                d: getPath(),
+                fill: 'none',
+                stroke: 'transparent',
+                'stroke-width': 20,
+                style: { cursor: 'pointer', pointerEvents: 'stroke' }
+            }),
+            ...circles
+        ]);
+    }
+});
 
 // Import Vue Flow styles
 import '@vue-flow/core/dist/style.css';
@@ -42,6 +149,8 @@ const {
     removeNodes,
     removeEdges,
     endConnection,
+    setEdges,
+    screenToFlowCoordinate,
 } = useVueFlow();
 
 const form = useForm({
@@ -62,7 +171,7 @@ const debounce = (fn, delay) => {
 
 // Auto-save function
 const autoSaveProject = async () => {
-    if (!form.id) return; // Don't auto-save if no ID (new project)
+    if (!form.id) return;
 
     try {
         isSaving.value = true;
@@ -113,45 +222,32 @@ onMounted(() => {
         }
     }
 
-    // Trigger auto-save on any change
     onNodesChange(debouncedAutoSave);
     onEdgesChange(debouncedAutoSave);
 });
 
-// Also watch title and description for auto-save
 watch(() => form.title, debouncedAutoSave);
 watch(() => form.description, debouncedAutoSave);
 
 const handleDeleteKey = (event) => {
-    if (event.key !== 'Delete' && event.key !== 'Backspace') {
-        return;
-    }
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return;
 
     const target = event.target;
     if (target instanceof HTMLElement) {
         const isTypingTarget = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-        if (isTypingTarget) {
-            return;
-        }
+        if (isTypingTarget) return;
     }
 
     const selectedNodes = getSelectedNodes.value;
     const selectedEdges = getSelectedEdges.value;
 
-    if (!selectedNodes.length && !selectedEdges.length) {
-        return;
-    }
+    if (!selectedNodes.length && !selectedEdges.length) return;
 
     event.preventDefault();
     event.stopPropagation();
 
-    if (selectedEdges.length) {
-        removeEdges(selectedEdges);
-    }
-
-    if (selectedNodes.length) {
-        removeNodes(selectedNodes, true);
-    }
+    if (selectedEdges.length) removeEdges(selectedEdges);
+    if (selectedNodes.length) removeNodes(selectedNodes, true);
 };
 
 onMounted(() => {
@@ -162,7 +258,6 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', handleDeleteKey, true);
 });
 
-// Handle manual connections (Drag & Drop)
 onConnect((params) => {
     addEdges({
         ...params,
@@ -170,25 +265,86 @@ onConnect((params) => {
         animated: false,
         style: { stroke: '#000', strokeWidth: 3, fill: 'none' },
         markerEnd: { type: MarkerType.ArrowClosed, color: '#000' },
+        updatable: true,
     });
-
     endConnection();
     debouncedAutoSave();
 });
 
-// Handle edge reconnection
 onEdgeUpdate(({ edge, connection }) => {
     updateEdge(edge, connection);
     debouncedAutoSave();
 });
 
-// Quick Add Node Function
+const onEdgeUpdateEnd = () => {
+    debouncedAutoSave();
+};
+
+// Double click on edge to add a waypoint
+const onEdgeDoubleClick = ({ event, edge }) => {
+    event.preventDefault();
+    
+    const position = screenToFlowCoordinate({
+        x: event.clientX,
+        y: event.clientY,
+    });
+    
+    // Dapatkan semua titik termasuk punca (source) dan hujung (target)
+    // Nota: Dalam Vue Flow, koordinat source/target pada edge object biasanya ada jika rendered
+    const sourcePos = { x: edge.sourceX, y: edge.sourceY };
+    const targetPos = { x: edge.targetX, y: edge.targetY };
+    const currentWaypoints = edge.data?.waypoints || [];
+    
+    const allPoints = [sourcePos, ...currentWaypoints, targetPos];
+    
+    // Cari segmen mana yang paling dekat dengan klik
+    let minDistance = Infinity;
+    let insertIndex = 0;
+    let projectedPoint = position;
+
+    for (let i = 0; i < allPoints.length - 1; i++) {
+        const p1 = allPoints[i];
+        const p2 = allPoints[i + 1];
+        
+        // Cari titik terdekat pada segmen (projection)
+        const l2 = Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2);
+        if (l2 === 0) continue;
+        
+        let t = ((position.x - p1.x) * (p2.x - p1.x) + (position.y - p1.y) * (p2.y - p1.y)) / l2;
+        t = Math.max(0, Math.min(1, t));
+        
+        const closest = {
+            x: p1.x + t * (p2.x - p1.x),
+            y: p1.y + t * (p2.y - p1.y)
+        };
+        
+        const dist = Math.sqrt(Math.pow(position.x - closest.x, 2) + Math.pow(position.y - closest.y, 2));
+        
+        if (dist < minDistance) {
+            minDistance = dist;
+            insertIndex = i; // Index dalam waypoints adalah insertIndex (sebab i=0 adalah source)
+            projectedPoint = closest;
+        }
+    }
+    
+    const newWaypoints = [...currentWaypoints];
+    // Masukkan pada posisi yang betul (insertIndex 0 bermaksud lepas source)
+    newWaypoints.splice(insertIndex, 0, projectedPoint);
+    
+    setEdges(edges.value.map(e => 
+        e.id === edge.id 
+            ? { ...e, data: { ...e.data, waypoints: newWaypoints }, type: 'editable' }
+            : e
+    ));
+    debouncedAutoSave();
+};
+
 const quickAdd = (sourceId, direction) => {
     const sourceNode = findNode(sourceId);
     if (!sourceNode) return;
 
     const id = `node_${Date.now()}`;
-    const offset = 250; 
+    const offset = 250;
     
     let newPos = { x: sourceNode.position.x, y: sourceNode.position.y };
     let sourceHandle = 'bottom';
@@ -214,8 +370,8 @@ const quickAdd = (sourceId, direction) => {
             id: `edge_${Date.now()}`,
             source: sourceId,
             target: id,
-            sourceHandle: sourceHandle,
-            targetHandle: targetHandle,
+            sourceHandle,
+            targetHandle,
             type: 'smoothstep',
             style: { stroke: '#000', strokeWidth: 3, fill: 'none' },
             markerEnd: { type: MarkerType.ArrowClosed, color: '#000' },
@@ -225,7 +381,6 @@ const quickAdd = (sourceId, direction) => {
     }, 100);
 };
 
-// Sidebar Functions
 const addBox = () => {
     const selectedNodes = getSelectedNodes.value;
     const selectedNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
@@ -234,12 +389,7 @@ const addBox = () => {
         ? { x: selectedNode.position.x + 250, y: selectedNode.position.y }
         : { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 };
 
-    addNodes({
-        id,
-        type: 'flowchart',
-        label: 'NEW BOX',
-        position,
-    });
+    addNodes({ id, type: 'flowchart', label: 'NEW BOX', position });
 
     if (selectedNode) {
         setTimeout(() => {
@@ -272,24 +422,18 @@ const addText = () => {
     debouncedAutoSave();
 };
 
-// Save the project
 const saveProject = () => {
     form.content = JSON.stringify(toObject());
     form.post(route('projects.save'));
 };
 
-// Remove node
 const removeNode = (id) => {
     const node = findNode(id);
-    if (!node) {
-        return;
-    }
-
+    if (!node) return;
     removeNodes([node], true);
     debouncedAutoSave();
 };
 
-// Update node label
 const updateNodeLabel = (id, newLabel) => {
     const node = nodes.value.find(n => n.id === id);
     if (node) {
@@ -299,12 +443,10 @@ const updateNodeLabel = (id, newLabel) => {
     }
 };
 
-// Export Functions
 const exportFlowchart = async (format) => {
     const el = document.querySelector('.vue-flow__viewport');
     if (!el) return;
 
-    // Helper to download file
     const download = (dataUrl, extension) => {
         const a = document.createElement('a');
         a.href = dataUrl;
@@ -366,7 +508,6 @@ const exportFlowchart = async (format) => {
     <Head :title="form.title" />
 
     <div class="h-screen flex flex-col bg-[#f8f9fa] font-sans overflow-hidden">
-        <!-- Toolbar -->
         <header class="h-20 bg-white border-b border-gray-200 flex items-center justify-between px-8 z-50">
             <div class="flex items-center space-x-6">
                 <Link :href="route('dashboard')" class="flex items-center space-x-3 group">
@@ -390,7 +531,6 @@ const exportFlowchart = async (format) => {
             </div>
 
             <div class="flex items-center space-x-4">
-                <!-- Auto-save Status -->
                 <div v-if="form.id" class="text-[10px] text-gray-400 font-bold uppercase tracking-widest flex items-center space-x-2">
                     <div v-if="isSaving" class="flex items-center space-x-1">
                         <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -403,7 +543,6 @@ const exportFlowchart = async (format) => {
                     <span v-else>Autosave enabled</span>
                 </div>
 
-                <!-- Export Dropdown -->
                 <div class="relative group">
                     <button class="px-4 py-2 bg-gray-100 text-black text-xs font-bold uppercase tracking-widest hover:bg-gray-200 transition-all duration-300 flex items-center space-x-2 border border-gray-200">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -411,17 +550,10 @@ const exportFlowchart = async (format) => {
                         </svg>
                         <span>Export</span>
                     </button>
-                    <!-- Dropdown Menu -->
                     <div class="absolute right-0 mt-0 w-32 bg-white border border-gray-200 shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 flex flex-col">
-                        <button @click="exportFlowchart('png')" class="text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-black hover:text-white transition-colors uppercase tracking-widest">
-                            PNG Image
-                        </button>
-                        <button @click="exportFlowchart('jpg')" class="text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-black hover:text-white transition-colors uppercase tracking-widest border-t border-gray-100">
-                            JPG Image
-                        </button>
-                        <button @click="exportFlowchart('pdf')" class="text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-black hover:text-white transition-colors uppercase tracking-widest border-t border-gray-100">
-                            PDF Document
-                        </button>
+                        <button @click="exportFlowchart('png')" class="text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-black hover:text-white transition-colors uppercase tracking-widest">PNG Image</button>
+                        <button @click="exportFlowchart('jpg')" class="text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-black hover:text-white transition-colors uppercase tracking-widest border-t border-gray-100">JPG Image</button>
+                        <button @click="exportFlowchart('pdf')" class="text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-black hover:text-white transition-colors uppercase tracking-widest border-t border-gray-100">PDF Document</button>
                     </div>
                 </div>
 
@@ -444,7 +576,6 @@ const exportFlowchart = async (format) => {
         </header>
 
         <div class="flex-1 flex overflow-hidden">
-            <!-- Left Sidebar (Palette) -->
             <aside class="w-20 bg-white border-r border-gray-200 flex flex-col items-center py-8 space-y-8 z-40">
                 <button @click="addBox" class="sidebar-tool group" title="Add Box">
                     <div class="w-10 h-10 border-2 border-black flex items-center justify-center group-hover:bg-black group-hover:text-white transition-colors">
@@ -463,7 +594,6 @@ const exportFlowchart = async (format) => {
                 </button>
             </aside>
 
-            <!-- Editor Area -->
             <div class="flex-1 relative">
                 <VueFlow
                     :nodes="nodes"
@@ -471,22 +601,25 @@ const exportFlowchart = async (format) => {
                     @nodes-change="onNodesChange"
                     @edges-change="onEdgesChange"
                     @edge-update="onEdgeUpdate"
+                    @edge-update-end="onEdgeUpdateEnd"
+                    @edge-double-click="onEdgeDoubleClick"
                     @connect="onConnect"
                     :edges-updatable="true"
                     :connection-mode="ConnectionMode.Loose"
                     :default-edge-options="{ type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed, color: '#000' }, style: { stroke: '#000', strokeWidth: 3, fill: 'none' }, updatable: true }"
                     class="flowchart-flow w-full h-full"
                 >
-                    <!-- Custom Flowchart Node -->
+                    <template #edge-editable="edgeProps">
+                        <EditableEdge v-bind="edgeProps" />
+                    </template>
+
                     <template #node-flowchart="{ id, label, selected }">
                         <div class="flowchart-node group cursor-grab active:cursor-grabbing" :class="{ 'selected': selected }">
-                            <!-- Unified Handles -->
                             <Handle id="top" type="source" :position="Position.Top" />
                             <Handle id="bottom" type="source" :position="Position.Bottom" />
                             <Handle id="left" type="source" :position="Position.Left" />
                             <Handle id="right" type="source" :position="Position.Right" />
 
-                            <!-- Quick Add Buttons (Moved further out) -->
                             <button @click.stop="quickAdd(id, 'top')" class="quick-add-btn top-btn"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg></button>
                             <button @click.stop="quickAdd(id, 'bottom')" class="quick-add-btn bottom-btn"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg></button>
                             <button @click.stop="quickAdd(id, 'left')" class="quick-add-btn left-btn"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg></button>
@@ -498,7 +631,6 @@ const exportFlowchart = async (format) => {
                         </div>
                     </template>
 
-                    <!-- Custom Text Node -->
                     <template #node-flowchart-text="{ id, label, selected }">
                         <div class="flowchart-text-node group cursor-grab active:cursor-grabbing" :class="{ 'selected': selected }">
                             <Handle id="top" type="source" :position="Position.Top" />
@@ -513,9 +645,9 @@ const exportFlowchart = async (format) => {
                     <Controls />
                 </VueFlow>
             </div>
+
         </div>
 
-        <!-- Footer Stats -->
         <footer class="h-8 bg-black flex items-center justify-between px-8 text-[9px] text-white/40 font-mono uppercase tracking-[0.2em]">
             <div class="flex space-x-8">
                 <div>Nodes: {{ nodes.length }}</div>
@@ -527,7 +659,6 @@ const exportFlowchart = async (format) => {
 </template>
 
 <style>
-/* Sidebar Styling */
 .sidebar-tool {
     display: flex;
     flex-direction: column;
@@ -546,7 +677,6 @@ const exportFlowchart = async (format) => {
 
 .sidebar-tool:hover .sidebar-label { color: #000; }
 
-/* Node Styling */
 .flowchart-flow .vue-flow__node-flowchart, 
 .flowchart-flow .vue-flow__node-flowchart-text {
     padding: 0 !important;
@@ -584,7 +714,6 @@ const exportFlowchart = async (format) => {
     border-style: dashed;
 }
 
-/* Quick Add Buttons */
 .quick-add-btn {
     position: absolute;
     width: 24px;
@@ -627,9 +756,54 @@ const exportFlowchart = async (format) => {
 
 .node-input:focus { outline: none; }
 
-.flowchart-flow .vue-flow__edge-path { stroke: #000 !important; stroke-width: 3px !important; cursor: pointer; fill: none !important; }
-.flowchart-flow .vue-flow__edge-path:hover { stroke-width: 4px !important; stroke: #ef4444 !important; }
-.flowchart-flow .vue-flow__edge.selected .vue-flow__edge-path { stroke: #ef4444 !important; stroke-width: 4px !important; }
+/* Edge styling */
+.flowchart-flow .vue-flow__edge-path { 
+    stroke: #000 !important; 
+    stroke-width: 3px !important; 
+    cursor: pointer; 
+    fill: none !important; 
+}
+.flowchart-flow .vue-flow__edge-path:hover { 
+    stroke-width: 5px !important; 
+    stroke: #ef4444 !important; 
+}
+.flowchart-flow .vue-flow__edge.selected .vue-flow__edge-path { 
+    stroke: #ef4444 !important; 
+    stroke-width: 4px !important; 
+}
+
+/* Edge interaction layer - wider for easier click */
+.flowchart-flow .vue-flow__edge-interaction { 
+    stroke-width: 20px !important; 
+    cursor: pointer !important; 
+    fill: none;
+    pointer-events: stroke !important;
+}
+
+/* Edge updater handle - VISIBLE when edge is selected */
+.flowchart-flow .vue-flow__edge-updater { 
+    cursor: move !important; 
+    fill: #ef4444 !important;
+    stroke: #fff !important;
+    stroke-width: 2 !important;
+    opacity: 1 !important;
+    pointer-events: all !important;
+    display: block !important;
+}
+
+.flowchart-flow .vue-flow__edge.selected .vue-flow__edge-updater {
+    opacity: 1 !important;
+    display: block !important;
+}
+
+/* Waypoint bend handles */
+.flowchart-flow .vue-flow__edge .vue-flow__edge-bend {
+    fill: #ef4444 !important;
+    stroke: #fff !important;
+    stroke-width: 2 !important;
+    cursor: move !important;
+    pointer-events: all !important;
+}
 
 .flowchart-flow .vue-flow__handle { 
     width: 12px !important; 
