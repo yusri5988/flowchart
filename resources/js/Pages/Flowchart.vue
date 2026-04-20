@@ -561,6 +561,17 @@ const exportFlowchart = async (format) => {
         setViewport(originalViewport);
     }
 };
+
+const autoResizeTextarea = (el) => {
+    if (el) {
+        setTimeout(() => {
+            el.style.height = 'auto';
+            if (el.scrollHeight > 0) {
+                el.style.height = el.scrollHeight + 'px';
+            }
+        }, 50);
+    }
+};
 </script>
 
 <template>
@@ -685,7 +696,7 @@ const exportFlowchart = async (format) => {
                             <button @click.stop="quickAdd(id, 'right')" class="quick-add-btn right-btn"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg></button>
 
                             <div class="absolute inset-0 z-0"></div>
-                            <textarea :value="label" @input="(e) => { updateNodeLabel(id, e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }" class="node-input relative z-10 nodrag" rows="1" placeholder="TYPE HERE..."></textarea>
+                            <textarea :ref="autoResizeTextarea" :value="label" @input="(e) => { updateNodeLabel(id, e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }" class="node-input relative z-10 nodrag" rows="1" placeholder="TYPE HERE..."></textarea>
                             <button @click.stop="removeNode(id)" class="absolute -top-3 -right-3 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg></button>
                         </div>
                     </template>
@@ -695,7 +706,7 @@ const exportFlowchart = async (format) => {
                             <Handle id="top" type="source" :position="Position.Top" />
                             <Handle id="bottom" type="source" :position="Position.Bottom" />
                             <div class="absolute inset-0 z-0"></div>
-                            <textarea :value="label" @input="(e) => { updateNodeLabel(id, e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }" class="node-input relative z-10 nodrag" rows="1" placeholder="TEXT..."></textarea>
+                            <textarea :ref="autoResizeTextarea" :value="label" @input="(e) => { updateNodeLabel(id, e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }" class="node-input relative z-10 nodrag" rows="1" placeholder="TEXT..."></textarea>
                             <button @click.stop="removeNode(id)" class="absolute -top-3 -right-3 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-20"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg></button>
                         </div>
                     </template>
