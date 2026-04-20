@@ -1,10 +1,10 @@
 <script setup>
 import { onMounted, onBeforeUnmount, nextTick, ref, watch, h } from 'vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType, getRectOfNodes, getTransformForBounds, BaseEdge, getSmoothStepPath } from '@vue-flow/core';
+import { VueFlow, useVueFlow, Handle, Position, ConnectionMode, MarkerType, BaseEdge, getSmoothStepPath } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
-import { toPng, toJpeg } from 'html-to-image';
+import { toCanvas, toPng, toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 
@@ -151,6 +151,8 @@ const {
     endConnection,
     setEdges,
     screenToFlowCoordinate,
+    viewport,
+    setViewport,
 } = useVueFlow();
 
 const form = useForm({
@@ -444,62 +446,119 @@ const updateNodeLabel = (id, newLabel) => {
 };
 
 const exportFlowchart = async (format) => {
-    const el = document.querySelector('.vue-flow__viewport');
-    if (!el) return;
+    const flowEl = document.querySelector('.vue-flow');
+    if (!flowEl) return;
 
-    const download = (dataUrl, extension) => {
-        const a = document.createElement('a');
-        a.href = dataUrl;
-        a.download = `${form.title.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}.${extension}`;
-        a.click();
-    };
+    // Save original viewport
+    const originalViewport = viewport.value;
 
-    const currentNodes = nodes.value || [];
-    if (!currentNodes.length) {
-        alert('No nodes to export.');
-        return;
-    }
+    // Elements to hide temporarily
+    const hideClasses = [
+        '.vue-flow__controls', 
+        '.vue-flow__panel', 
+        '.vue-flow__minimap', 
+        '.quick-add-btn', 
+        '.vue-flow__handle', 
+        '.vue-flow__edge-updater', 
+        '.vue-flow__edge-bend'
+    ];
+    
+    hideClasses.forEach(selector => {
+        document.querySelectorAll(selector).forEach(el => {
+            el.dataset.originalDisplay = el.style.display || '';
+            el.style.display = 'none';
+        });
+    });
 
-    const bounds = getRectOfNodes(currentNodes);
-    const padding = 80;
-    const exportWidth = Math.max(1, Math.ceil(bounds.width + padding * 2));
-    const exportHeight = Math.max(1, Math.ceil(bounds.height + padding * 2));
-    const viewport = getTransformForBounds(bounds, exportWidth, exportHeight, 0.01, 4, padding / Math.max(exportWidth, exportHeight));
+    // Temporarily remove .selected classes
+    const selectedEls = [];
+    document.querySelectorAll('.selected').forEach(el => {
+        selectedEls.push(el);
+        el.classList.remove('selected');
+    });
+
+    // Temporarily replace textareas with divs for better rendering in html-to-image
+    const revertedTextareas = [];
+    document.querySelectorAll('textarea').forEach(textarea => {
+        const div = document.createElement('div');
+        const computed = window.getComputedStyle(textarea);
+        div.textContent = textarea.value;
+        ['width', 'height', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'textAlign', 'color', 'padding', 'margin', 'border', 'boxSizing', 'letterSpacing', 'textTransform'].forEach(prop => {
+            div.style[prop] = computed[prop];
+        });
+        div.style.whiteSpace = 'pre-wrap';
+        div.style.wordBreak = 'break-word';
+        div.className = textarea.className;
+        
+        textarea.parentNode.insertBefore(div, textarea);
+        textarea.style.display = 'none';
+        revertedTextareas.push({ textarea, div });
+    });
+
+    // Fit view to bounds to make sure all nodes are inside the visible container
+    fitView({ padding: 0.1 });
+    
+    // Wait for Vue Flow to finish animating and updating DOM
+    await nextTick();
+    await new Promise(resolve => setTimeout(resolve, 800));
 
     try {
-        const options = {
+        const config = {
             backgroundColor: '#f8f9fa',
             quality: 1,
-            pixelRatio: 2,
-            width: exportWidth,
-            height: exportHeight,
-            style: {
-                width: `${exportWidth}px`,
-                height: `${exportHeight}px`,
-                transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
-                transformOrigin: '0 0',
-            },
+            pixelRatio: format === 'pdf' ? 3 : 2,
         };
 
+        let dataUrl;
         if (format === 'png') {
-            const dataUrl = await toPng(el, options);
-            download(dataUrl, 'png');
+            dataUrl = await toPng(flowEl, config);
         } else if (format === 'jpg') {
-            const dataUrl = await toJpeg(el, options);
-            download(dataUrl, 'jpg');
+            dataUrl = await toJpeg(flowEl, config);
+        } else {
+            const canvas = await toCanvas(flowEl, config);
+            dataUrl = canvas.toDataURL('image/png', 1.0);
+        }
+
+        if (format === 'png' || format === 'jpg') {
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            a.download = `${form.title.replace(/\\s+/g, '_').toLowerCase()}_${Date.now()}.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
         } else if (format === 'pdf') {
-            const dataUrl = await toPng(el, options);
+            const pdfWidth = flowEl.offsetWidth;
+            const pdfHeight = flowEl.offsetHeight;
             const pdf = new jsPDF({
-                orientation: exportWidth >= exportHeight ? 'landscape' : 'portrait',
+                orientation: pdfWidth >= pdfHeight ? 'landscape' : 'portrait',
                 unit: 'px',
-                format: [exportWidth, exportHeight],
+                format: [pdfWidth, pdfHeight],
             });
-            pdf.addImage(dataUrl, 'PNG', 0, 0, exportWidth, exportHeight);
-            pdf.save(`${form.title.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}.pdf`);
+            pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            pdf.save(`${form.title.replace(/\\s+/g, '_').toLowerCase()}_${Date.now()}.pdf`);
         }
     } catch (err) {
         console.error('Failed to export:', err);
         alert('Failed to export flowchart.');
+    } finally {
+        // Restore textareas
+        revertedTextareas.forEach(({ textarea, div }) => {
+            div.remove();
+            textarea.style.display = '';
+        });
+
+        // Restore visibility of hidden elements
+        hideClasses.forEach(selector => {
+            document.querySelectorAll(selector).forEach(el => {
+                el.style.display = el.dataset.originalDisplay;
+            });
+        });
+
+        // Restore selected elements
+        selectedEls.forEach(el => el.classList.add('selected'));
+
+        // Restore original viewport
+        setViewport(originalViewport);
     }
 };
 </script>
